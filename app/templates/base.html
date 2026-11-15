@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}双 VCF 变异核对{% endblock %}</title>
+  <title>{% block title %}测序数据核对工具{% endblock %}</title>
   <style>
     :root {
       --bg: #f5f7fa; --card: #ffffff; --ink: #1f2933; --muted: #6b7280;
@@ -61,6 +61,15 @@
     .tag.SNV { background: #e0e7ff; color: #3730a3; }
     .tag.INS { background: var(--ok-soft); color: var(--ok); }
     .tag.DEL { background: #ffedd5; color: #c2410c; }
+    .tag.qualified { background: var(--ok-soft); color: var(--ok); }
+    .tag.conflict { background: var(--bad-soft); color: var(--bad); }
+    .tag.insufficient { background: var(--warn-soft); color: var(--warn); }
+    .tag.quarantined { background: #e5e7eb; color: #374151; }
+    .fasta-preview {
+      max-height: 340px; overflow: auto; margin: 0; padding: 14px 16px;
+      background: #0f172a; color: #e2e8f0; border-radius: 8px;
+      font-size: 12.5px; line-height: 1.55; white-space: pre;
+    }
     .dose { font-weight: 700; }
     .dose.d2 { color: var(--bad); }
     .dose.d1 { color: var(--warn); }
@@ -80,8 +89,8 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>双 VCF 变异核对</h1>
-    <p>同一参考、同一样本，两套变异识别程序结果复查工具</p>
+    <h1>测序数据核对工具</h1>
+    <p>双 VCF 变异核对 · 单端 FASTQ UMI 分子共识</p>
   </header>
   {% block body %}{% endblock %}
 </div>

@@ -1,14 +1,13 @@
 {% extends "base.html" %}
 {% block body %}
-{% if error %}
-<div class="alert error">
-  核对失败：{{ error }}<br>
-  <span style="font-weight:400;font-size:13.5px">按要求本次不展示任何局部结论，请修正输入后重新上传。</span>
-</div>
-{% endif %}
-
 <div class="card">
-  <h2>上传文件</h2>
+  <h2>双 VCF 变异核对</h2>
+  {% if error %}
+  <div class="alert error">
+    核对失败：{{ error }}<br>
+    <span style="font-weight:400;font-size:13.5px">按要求本次不展示任何局部结论，请修正输入后重新上传。</span>
+  </div>
+  {% endif %}
   <form action="/compare" method="post" enctype="multipart/form-data">
     <label class="field">
       单条染色体参考 FASTA
@@ -29,13 +28,42 @@
   </form>
 </div>
 
+<div class="card">
+  <h2>单端 FASTQ 分子共识（UMI 去重）</h2>
+  {% if consensus_error %}
+  <div class="alert error">
+    共识构建失败：{{ consensus_error }}<br>
+    <span style="font-weight:400;font-size:13.5px">FASTQ 结构或质量错误使整批失败，不交付任何部分结果，请修正后重新上传。</span>
+  </div>
+  {% endif %}
+  <form action="/consensus" method="post" enctype="multipart/form-data">
+    <label class="field">
+      单端 FASTQ
+      <span class="hint">（读长 40–100 bp，读段名末尾带六碱基 UMI，Phred+33 质量，不超过 {{ fastq_limit_kib }} KiB）</span>
+      <input type="file" name="fastq" accept=".fq,.fastq,text/plain" required>
+    </label>
+    <button type="submit">构建分子共识</button>
+  </form>
+</div>
+
 <div class="card rules">
-  <h2 style="color:var(--ink)">接收与判定规则</h2>
+  <h2 style="color:var(--ink)">VCF 核对：接收与判定规则</h2>
   <ul>
     <li>仅接受 A/C/G/T 构成的<strong>单碱基替换</strong>，以及事件长度不超过 20 bp 的<strong>纯插入 / 纯缺失</strong>；其他形态（MNV、符号化 ALT、* 等）直接判失败。</li>
     <li>GT 必须为<strong>非缺失、未分相的二倍体</strong>（形如 <span class="mono">0/1</span>、<span class="mono">1/1</span>，多 ALT 可为 <span class="mono">1/2</span>）；按 GT 分别计算各 ALT 的 0/1/2 剂量，剂量为 0 的变异忽略。</li>
     <li>插入、缺失对照参考做左对齐归一：重复区域中位置写法不同的同一 indel 归为同一等位变异。</li>
     <li>REF 与参考序列不符，或同一文件内同一归一变异存在互相矛盾的剂量时，<strong>整次核对失败</strong>，不展示局部结论。</li>
+  </ul>
+</div>
+
+<div class="card rules">
+  <h2 style="color:var(--ink)">分子共识：分组、纠错与判定规则</h2>
+  <ul>
+    <li>同一 UMI 的读段视为同一原始分子的 PCR 复制；UMI 取读段名（<span class="mono">@</span> 后首个空白前）末尾 6 个字符，须为 A/C/G/T。</li>
+    <li>UMI 纠错：原始计数 <strong>≥ 3</strong> 且 <strong>≥ 子组计数 3 倍</strong>的 UMI 可作为合格父组；子组与父组<strong>仅差一位</strong>且父组<strong>唯一</strong>时才被接收（读段并入父组）。</li>
+    <li>被多个合格父组争用、或接收后会构成<strong>连锁纠正</strong>的子组一律<strong>隔离</strong>，不并入任何组、不生成共识。</li>
+    <li>纠错后的组内<strong>读长不一</strong>，或任一位存在 Q≥20 的不同碱基 → 记为<strong>冲突</strong>；任一位没有至少两条 Q≥20 读段支持同一碱基 → 记为<strong>证据不足</strong>。</li>
+    <li>只为<strong>合格组</strong>生成一条分子共识 FASTA 记录，可下载；FASTQ 结构或质量错误使<strong>整批失败</strong>，不交付部分结果。</li>
   </ul>
 </div>
 {% endblock %}

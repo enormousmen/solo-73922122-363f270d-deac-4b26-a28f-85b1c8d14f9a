@@ -17,11 +17,26 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
 from app.bio import MAX_FASTA_BYTES, MAX_VCF_BYTES  # noqa: E402
+from app.umi import MAX_FASTQ_BYTES  # noqa: E402
 
 client = TestClient(app)
 
 FASTA = b">chrT\nACGTAAAACGTT\n"
 HEADER = "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n"
+
+HI = "I"          # Phred+33 的 Q40
+SEQ1 = "ACGT" * 10  # 40 bp
+
+
+def fq(records):
+    return "".join(f"@{n}\n{s}\n+\n{q}\n" for n, s, q in records).encode()
+
+
+FASTQ_OK = fq([
+    ("r1:AAAAAA", SEQ1, HI * 40),
+    ("r2:AAAAAA", SEQ1, HI * 40),
+    ("r3:AAAAAA", SEQ1, HI * 40),
+])
 
 
 def vcf(rows):
@@ -143,6 +158,101 @@ class WebTests(unittest.TestCase):
                 "vcf_a": ("a.vcf", vcf(["chrT\t2\t.\tG\tT\t.\t.\t.\tGT\t0/1"]), "text/plain"),
                 "vcf_b": ("b.vcf", vcf([]), "text/plain"),
             },
+        )
+        self.assertEqual(resp.status_code, 422)
+        self.assertFalse(resp.json()["ok"])
+
+
+class ConsensusWebTests(unittest.TestCase):
+    def post_fastq(self, data):
+        return client.post(
+            "/consensus",
+            files={"fastq": ("reads.fastq", data, "text/plain")},
+        )
+
+    def test_index_shows_consensus_entry(self):
+        resp = client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("单端 FASTQ", resp.text)
+        self.assertIn("构建分子共识", resp.text)
+        self.assertIn("双 VCF 变异核对", resp.text)
+
+    def test_consensus_happy_path(self):
+        resp = self.post_fastq(FASTQ_OK)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.text
+        self.assertIn("共识概览", body)
+        self.assertIn("合格组", body)
+        self.assertIn("&gt;UMI:AAAAAA reads=3", body)   # FASTA 预览
+        self.assertIn("下载分子共识 FASTA", body)        # 下载按钮
+
+    def test_consensus_categories_and_download_payload(self):
+        records = [(f"p{i}:AAAAAA", SEQ1, HI * 40) for i in range(6)]
+        records += [(f"c{i}:AAAAAT", SEQ1, HI * 40) for i in range(2)]  # 子组并入
+        records += [("x1:CCCCCC", SEQ1, HI * 40)]                        # 证据不足
+        resp = self.post_fastq(fq(records))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.text
+        self.assertIn("纠错并入子组：1", body)
+        self.assertIn("&gt;UMI:AAAAAA reads=8 corrected=AAAAAT", body)
+        self.assertIn("证据不足", body)
+        self.assertIn("CCCCCC", body)
+
+    def test_consensus_invalid_fastq_fails_whole_batch(self):
+        resp = self.post_fastq(b"@r1:AAAAAA\n" + SEQ1.encode() + b"\n+\n")  # 缺质量行
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("共识构建失败", resp.text)
+        self.assertNotIn("共识概览", resp.text)          # 不交付部分结果
+
+    def test_consensus_bad_quality_fails_whole_batch(self):
+        bad = fq([("r1:AAAAAA", SEQ1, " " + HI * 39)])   # 空格不是 Phred+33
+        resp = self.post_fastq(bad)
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("共识构建失败", resp.text)
+
+    def test_consensus_bad_umi_fails_whole_batch(self):
+        resp = self.post_fastq(fq([("r1:ACGTAN", SEQ1, HI * 40)]))
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("共识构建失败", resp.text)
+
+    def test_consensus_size_limit_enforced(self):
+        big = fq([("r1:AAAAAA", SEQ1, HI * 40)])
+        big = big * (MAX_FASTQ_BYTES // len(big) + 1)
+        resp = self.post_fastq(big)
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("超过大小上限", resp.text)
+
+    def test_consensus_empty_file_rejected(self):
+        resp = self.post_fastq(b"")
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("为空", resp.text)
+
+    def test_consensus_download_returns_attachment(self):
+        fasta_text = ">UMI:AAAAAA reads=3\n" + SEQ1 + "\n"
+        resp = client.post("/consensus/download", data={"fasta": fasta_text})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("attachment", resp.headers["content-disposition"])
+        self.assertIn("consensus.fa", resp.headers["content-disposition"])
+        self.assertEqual(resp.text, fasta_text)
+
+    def test_api_consensus_happy_path(self):
+        resp = client.post(
+            "/api/consensus",
+            files={"fastq": ("reads.fastq", FASTQ_OK, "text/plain")},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["total_reads"], 3)
+        self.assertEqual(data["raw_umis"], 1)
+        self.assertEqual(data["counts"]["qualified"], 1)
+        self.assertIn(">UMI:AAAAAA reads=3", data["fasta"])
+        self.assertEqual(data["groups"][0]["consensus"], SEQ1)
+
+    def test_api_consensus_failure(self):
+        resp = client.post(
+            "/api/consensus",
+            files={"fastq": ("reads.fastq", b"not a fastq", "text/plain")},
         )
         self.assertEqual(resp.status_code, 422)
         self.assertFalse(resp.json()["ok"])

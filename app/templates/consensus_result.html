@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}分子共识结果 · 测序数据核对工具{% endblock %}
+{% block body %}
+<div class="card">
+  <h2>共识概览</h2>
+  <div class="meta">
+    <span class="pill">读段总数：{{ total_reads }}</span>
+    <span class="pill">原始 UMI 组数：{{ raw_umis }}</span>
+    <span class="pill">纠错并入子组：{{ merged_children }}</span>
+    <span class="pill">最终组数：{{ final_groups }}</span>
+  </div>
+  <div class="summary">
+    <div class="stat"><div class="num" style="color:var(--ok)">{{ counts.qualified }}</div><div class="lbl">合格组（已生成共识）</div></div>
+    <div class="stat"><div class="num" style="color:var(--bad)">{{ counts.conflict }}</div><div class="lbl">冲突组</div></div>
+    <div class="stat"><div class="num" style="color:var(--warn)">{{ counts.insufficient }}</div><div class="lbl">证据不足组</div></div>
+    <div class="stat"><div class="num">{{ counts.quarantined }}</div><div class="lbl">隔离组（UMI 纠错）</div></div>
+  </div>
+  {% if fasta %}
+  <form action="/consensus/download" method="post" style="margin-bottom:14px">
+    <input type="hidden" name="fasta" value="{{ fasta }}">
+    <button type="submit">下载分子共识 FASTA（{{ counts.qualified }} 条记录）</button>
+  </form>
+  {% else %}
+  <p class="muted">没有合格组，未生成任何分子共识序列。</p>
+  {% endif %}
+  <p><a class="back" href="/">← 返回重新上传</a></p>
+</div>
+
+{% if fasta %}
+<div class="card">
+  <h2>共识 FASTA 预览<span class="section-badge b-ok">{{ counts.qualified }}</span></h2>
+  <pre class="mono fasta-preview">{{ fasta }}</pre>
+</div>
+{% endif %}
+
+{% if problem_groups %}
+<div class="card">
+  <h2>需复查的组（未生成共识）<span class="section-badge b-warn">{{ problem_groups|length }}</span></h2>
+  <table>
+    <thead>
+      <tr><th style="width:110px">类别</th><th style="width:140px">UMI</th><th style="width:90px">读段数</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+    {% for g in problem_groups %}
+      <tr>
+        <td><span class="tag {{ g.category }}">{{ g.category_label }}</span></td>
+        <td class="mono">{{ g.umi }}</td>
+        <td>{{ g.reads }}</td>
+        <td>
+          {{ g.note }}
+          {% if g.corrected %}<div class="raw">已并入子组：{{ g.corrected|join(", ") }}</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
